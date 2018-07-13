@@ -1,15 +1,13 @@
 package newLineFollower;
 
-import lejos.hardware.Sound;
 import lejos.hardware.lcd.LCD;
 import lejos.hardware.motor.Motor;
 import lejos.hardware.port.SensorPort;
 import lejos.hardware.sensor.EV3ColorSensor;
 
-import java.io.FileWriter;
 import java.io.BufferedWriter;
 import java.io.File;
-import java.util.Arrays;
+import java.io.FileWriter;
 import java.util.Date;
 
 
@@ -42,8 +40,8 @@ public class LineFollower {
 
     protected void initializeEngines() {
         // 1: left, 2: right
-        leftSensor = new EV3ColorSensor(SensorPort.S4);
-        rightSensor = new EV3ColorSensor(SensorPort.S3);
+        leftSensor = new EV3ColorSensor(SensorPort.S1);
+        rightSensor = new EV3ColorSensor(SensorPort.S2);
         // SampleSize is the same for every sensor, because we use the same sensors in all three locations
         colorSampleSize = leftSensor.sampleSize();
         Motor.A.setSpeed(50);
@@ -105,16 +103,22 @@ public class LineFollower {
     protected static void forward() {
         Motor.A.forward();
         Motor.D.forward();
+        Motor.A.setSpeed(90);
+        Motor.D.setSpeed(90);
     }
 
     protected static void turnLeft() {
         Motor.A.backward();
         Motor.D.forward();
+        Motor.A.setSpeed(45);
+        Motor.D.setSpeed(45);
     }
 
     protected static void turnRight() {
         Motor.A.forward();
         Motor.D.backward();
+        Motor.A.setSpeed(45);
+        Motor.D.setSpeed(45);
     }
 
     protected static double getReward(int state) {
@@ -145,7 +149,7 @@ public class LineFollower {
     // We have 7 possible states and for each state there are 3 possible actions (in this particular case)
     // first value: states, second value: actions
     // e.g. [2][1] would equal: state = 2; action = 1 = forward
-    static double [][] QValues = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
+    static double [][] QValues = {{0, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 0}};
 
     protected static void initQValues() {
         for(int i = 0; i < QValues.length; i++) {
@@ -159,15 +163,10 @@ public class LineFollower {
         initQValues();
         int newState = -1;
         int roundCounter = 0;
-        int whiteCounter = 0;
         // We do not have an end state yet so we just let the robot drive all day long
         while(true) {
             roundCounter++;
             int state = (newState > -1) ? newState : getState();
-
-            if (state == 0) {
-                whiteCounter++;
-            }
 
             double maxUtil = -1000; //just some Value to begin the process
             int action = 1;
@@ -183,17 +182,14 @@ public class LineFollower {
             // no action has been found above, that is better than the others or if the randValue is below the
             // exploration value, a random number between 0 and 2 will be created for the action
 
-			if(Math.random() <= epsilon) {
-				action = (int) (Math.random()*3);
-			} else if (whiteCounter > 9) {
+            if(Math.random() <= epsilon) {
                 action = (int) (Math.random()*3);
-                whiteCounter = 0;
             }
 
             execute(action);
 
             try {
-                Thread.sleep(250);
+                Thread.sleep(180);
             } catch(Exception e) {
                 e.printStackTrace();
             }
@@ -217,19 +213,21 @@ public class LineFollower {
             QValues[state][action] =
                     (QValues[state][action] + alpha * (reward + (gamma * maxUtil) - QValues[state][action]));
 
-            LCD.drawString("--: " + actionToDirection(getMaxActionFromState(0)), 0, 0);
-            LCD.drawString("-1: " + actionToDirection(getMaxActionFromState(1)), 0, 1);
-            LCD.drawString("1-: " + actionToDirection(getMaxActionFromState(2)), 0, 2);
-            LCD.drawString("11: " + actionToDirection(getMaxActionFromState(3)), 0, 3);
-            LCD.drawString("State: " + nextState, 0,4);
+            LCD.drawString(actionToDirection(getMaxActionFromState(0)) + "," +actionToDirection(getMaxActionFromState(1)) + "," + actionToDirection(getMaxActionFromState(2)) + "," + actionToDirection(getMaxActionFromState(3)), 0, 0);
+            LCD.drawString("00: " + actionToDirection(getMaxActionFromState(0)) + " " + QValues[0][getMaxActionFromState(0)], 0, 1);
+            LCD.drawString("01: " + actionToDirection(getMaxActionFromState(1)) + " " + QValues[1][getMaxActionFromState(1)], 0, 2);
+            LCD.drawString("10: " + actionToDirection(getMaxActionFromState(2)) + " " + QValues[2][getMaxActionFromState(2)], 0, 3);
+            LCD.drawString("11: " + actionToDirection(getMaxActionFromState(3)) + " " + QValues[3][getMaxActionFromState(3)], 0, 4);
+            LCD.drawString("State: " + nextState, 0,5);
 
             try {
                 if ((roundCounter % 50) == 0) {
-                    out.write("" + roundCounter + ","
-                            + actionToDirection(getMaxActionFromState(0)) + ","
-                            + actionToDirection(getMaxActionFromState(1)) + ","
-                            + actionToDirection(getMaxActionFromState(2)) + ","
-                            + actionToDirection(getMaxActionFromState(3)) + "\\n");
+//                    out.write("" + roundCounter + ","
+//                            + actionToDirection(getMaxActionFromState(0)) + ","
+//                            + actionToDirection(getMaxActionFromState(1)) + ","
+//                            + actionToDirection(getMaxActionFromState(2)) + ","
+//                            + actionToDirection(getMaxActionFromState(3)) + "\\n");
+                    out.write(worldToJSON(roundCounter) + ",");
                     out.flush();
                 }
             } catch (Exception e) {
@@ -237,7 +235,7 @@ public class LineFollower {
             }
 
             try {
-                Thread.sleep(250);
+                Thread.sleep(180);
             } catch(Exception e) {
                 e.printStackTrace();
             }
@@ -264,6 +262,31 @@ public class LineFollower {
             }
         }
         return idx;
+    }
+
+    private String worldToJSON(int step) {
+        String tmp = "{";
+
+        tmp += "step:" + step + ",";
+        tmp += "values:" + qValuesToJSON();
+
+        return tmp + "}";
+    }
+
+    private String qValuesToJSON() {
+        String tmp = "[";
+
+        for (int i = 0; i < QValues.length; i++) {
+            String valTmp = "{";
+
+            valTmp += "left:" + QValues[i][0] + ",";
+            valTmp += "forward:" + QValues[i][1] + ",";
+            valTmp += "rigth:" + QValues[i][2];
+
+            tmp += valTmp + "}" + (i != QValues.length - 1 ? "," : "");
+        }
+
+        return tmp + "]";
     }
 
     public static void main(String[] args) {
